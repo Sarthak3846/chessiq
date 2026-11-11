@@ -21,3 +21,29 @@ chessengine/data/prepare_checkpoint.json
 chessengine/checkpoints/
 chessengine/data/processed_features/
 chessengine/data/training_data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ML datasets and generated data
+chessengine/data/raw/
+chessengine/data/processed/
+chessengine/data/processed_halfkp/
+chessengine/data/processed_halfkp_v2/
+chessengine/data/*.csv
+chessengine/data/*.pgn
+chessengine/data/*.sqlite
+chessengine/data/*.db
+
+# Model checkpoints: ignore all, then keep the final model
+chessengine/checkpoints/*.pth
+!chessengine/checkpoints/model_d_square.pth
+
+# Temporary files
+*.log
+*.tmp
+.DS_Store
+Thumbs.db

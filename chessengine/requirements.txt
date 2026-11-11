@@ -1,3 +1,6 @@
 pandas
 python-chess
 tqdm
+torch
+numpy
+matplotlib
