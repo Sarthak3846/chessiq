@@ -1,0 +1,3 @@
+PuzzleId,FEN,Moves,Rating,RatingDeviation,Popularity,NbPlays,Themes,GameUrl,OpeningTags
+TST01,6k1/5ppp/8/8/8/8/5PPP/3R2K1 b - - 0 1,h7h6 d1d8,700,75,95,1200,backRankMate mate mateIn1 short,https://lichess.org/TEST#1,
+TST02,r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 4 4,a7a6 h5f7,900,80,90,800,mate mateIn1 short,https://lichess.org/TEST#2,Italian_Game

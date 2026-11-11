@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { --sq-light: #f0d9b5; --sq-dark: #b58863; }
+html, body, #root { min-height: 100%; }
+body { @apply bg-ink text-bone font-sans font-light antialiased; overflow-x: hidden; }
+::selection { background: #8f0d0d; color: #fff; }
+*:focus-visible { outline: 1px solid #d12a2a; outline-offset: 3px; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #3a0707; border-radius: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+.grain::after { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 60; opacity: .06;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"); }
+.display { @apply font-display; font-optical-sizing: auto; letter-spacing: -0.02em; }
+.hair { border-color: rgba(241,233,223,.12); }
+.panel { @apply border hair bg-coal/70 backdrop-blur-md; }
+.btn { @apply relative inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm tracking-wide border border-blood-500 text-bone transition-all duration-300 overflow-hidden; }
+.btn::before { content: ''; position: absolute; inset: 0; background: #8f0d0d; transform: translateX(-101%); transition: transform .4s cubic-bezier(.2,.8,.2,1); z-index: -1; }
+.btn:hover::before { transform: translateX(0); }
+.btn-solid { @apply bg-blood-600 border-blood-600 hover:bg-blood-500 hover:border-blood-500; }
+.btn-solid::before { display: none; }
+.btn-ghost { @apply border hair text-ash hover:text-bone hover:border-blood-500; }
+.chip { @apply px-3 py-1 text-xs border hair text-ash transition-colors hover:text-bone hover:border-blood-500 cursor-pointer; }
+.chip-on { @apply border-blood-500 text-bone bg-blood-800/50; }
+.label { @apply text-xs text-ash font-light tracking-wide; }
+.split-bg { background: linear-gradient(90deg, #050505 0 50%, #7a0b0b 50% 100%); }
+.glow-red { box-shadow: 0 0 80px -10px rgba(176,18,18,.55); }
+
+.board-sq { position: relative; transition: background-color .2s; }
+.piece { position: absolute; inset: 0; background-size: 100% 100%; cursor: grab; transition: transform .18s cubic-bezier(.2,.8,.2,1), filter .2s; will-change: transform; }
+.piece:hover { transform: scale(1.06); filter: drop-shadow(0 6px 6px rgba(0,0,0,.35)); }
+.piece:active { cursor: grabbing; }
+@media (prefers-reduced-motion: reduce) { *, ::before, ::after { animation: none !important; transition: none !important; } }

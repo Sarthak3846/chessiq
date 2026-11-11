@@ -1,0 +1,23 @@
+# Node.js dependencies
+node_modules/
+**/node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# SQLite database and extraction checkpoint
+chessengine/data/*.db
+chessengine/data/prepare_checkpoint.json
+
+# Temporary files
+*.tmp
+*.log
+
+# Training artifacts
+chessengine/checkpoints/
+chessengine/data/processed_features/
+chessengine/data/training_data/
