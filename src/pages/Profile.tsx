@@ -98,7 +98,7 @@ export default function Profile() {
           {stats.by_difficulty.length > 0 && (
             <Section title="Results by opponent level">
               <div className="divide-y divide-white/10">
-                {stats.by_difficulty.map((d) => <div key={d.mode + d.difficulty} className="flex justify-between py-2.5 text-sm"><span>{d.mode === 'coach' ? 'AI Coach' : 'Stockfish'} · <span className="capitalize">{d.difficulty}</span></span><span className="text-ash">{d.wins} wins in {d.games} games</span></div>)}
+                {stats.by_difficulty.map((d) => <div key={d.mode + (d.difficulty ?? '')} className="flex justify-between py-2.5 text-sm"><span>{d.mode === 'coach' ? 'AI Coach' : 'Stockfish'} · <span className="capitalize">{d.difficulty ?? 'CHESS-IQ'}</span></span><span className="text-ash">{d.wins} wins in {d.games} games</span></div>)}
               </div>
             </Section>
           )}

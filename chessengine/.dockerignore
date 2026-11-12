@@ -1,0 +1,10 @@
+data/
+demo/
+**/__pycache__/
+**/*.pyc
+.venv/
+venv/
+.env
+*.csv
+*.log
+api/tests/

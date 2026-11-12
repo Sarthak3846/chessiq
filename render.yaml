@@ -1,0 +1,23 @@
+# Render Blueprint for the CHESS-IQ engine API. dockerfilePath / dockerContext are relative to the repo root.
+services:
+  - type: web
+    name: chessiq-engine
+    runtime: docker
+    dockerfilePath: ./chessengine/Dockerfile
+    dockerContext: ./chessengine
+    # The free plan has 512 MB of RAM, which is very tight for PyTorch + the search. Use at least "starter".
+    plan: starter
+    healthCheckPath: /api/health
+    envVars:
+      - key: ENGINE_DEFAULT_DEPTH
+        value: "3"
+      - key: ENGINE_MAX_DEPTH
+        value: "4"
+      - key: ENGINE_MAX_CONCURRENT
+        value: "1"
+      - key: TORCH_NUM_THREADS
+        value: "1"
+      - key: ENGINE_CHECKPOINT
+        value: checkpoints/model_d_square.pth
+      - key: CORS_ORIGINS
+        sync: false   # set in the Render dashboard, e.g. https://your-app.vercel.app

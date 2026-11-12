@@ -10,7 +10,7 @@ def main():
     root.geometry("700x740")
     root.minsize(620, 680)
     try:
-        engine = UCIEngine(Path(__file__).resolve().parent.parent, depth=3)
+        engine = UCIEngine(Path(__file__).resolve().parent.parent, depth=6)
     except Exception as exc:
         messagebox.showerror("Engine startup failed", str(exc))
         root.destroy()

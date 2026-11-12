@@ -8,9 +8,13 @@ import EvalBar from '../components/EvalBar'
 import MoveList from '../components/MoveList'
 import { Modal, PageHead } from '../components/Ui'
 import { DEFAULT_MATCH, DEPTH_MAX, DEPTH_MIN, DIFFICULTIES, MOVE_TIMES, getDifficulty, toLimit, type MatchSettings } from '../engine/config'
+import { useChessIq } from '../hooks/useChessIq'
 import { useStockfish } from '../hooks/useStockfish'
+import { requestEngineMove } from '../lib/engineApi'
+import { saveGame as saveGameRemote } from '../lib/api'
+import { useAuth } from '../store/auth'
 import { START_FEN, capturedPieces, fmtClock, materialEval, pieceUrl, resultText, safeChess } from '../lib/chess'
-import { buildPgn, copyText, downloadText, type GameKind } from '../lib/pgn'
+import { buildPgn, copyText, downloadText, gameResult, type GameKind } from '../lib/pgn'
 import { useApp } from '../store/app'
 
 type Mode = 'stockfish' | 'practice' | 'analysis' | 'local'
@@ -46,10 +50,17 @@ function Strip({ color, name, sub, captured, diff, clock, active }: { color: Col
 
 export default function Play({ variant = 'stockfish' }: { variant?: 'stockfish' | 'coach' }) {
   const coach = variant === 'coach'
-  const opponent = coach ? 'AI Coach' : 'Stockfish'
+  // Play the Coach is driven by our own CHESS-IQ engine (served by chessengine/api); Play uses Stockfish in the browser.
+  const opponent = coach ? 'CHESS-IQ' : 'Stockfish'
   const nav = useNavigate()
-  const { setAnalysisSeed, setCoachSeed, saveGame } = useApp()
-  const { engine, status: engineStatus, error: engineError, retry } = useStockfish()
+  const { setAnalysisSeed, setCoachSeed } = useApp()
+  const { user } = useAuth()
+  const sf = useStockfish(!coach)
+  const iq = useChessIq(coach)
+  const engine = sf.engine
+  const engineStatus = coach ? iq.status : sf.status
+  const engineError = coach ? iq.error : sf.error
+  const retry = coach ? iq.retry : sf.retry
 
   const [mode, setMode] = useState<Mode>('stockfish')
   const [match, setMatch] = useState<MatchSettings>(DEFAULT_MATCH)
@@ -72,10 +83,14 @@ export default function Play({ variant = 'stockfish' }: { variant?: 'stockfish' 
   const [flip, setFlip] = useState(false)
   const [toast, setToast] = useState('')
   const [closed, setClosed] = useState(false)
+  const [iqDepth, setIqDepth] = useState<number | null>(null) // CHESS-IQ search depth; null = server default
   const [copied, setCopied] = useState(false)
   const saved = useRef(false)
 
   const diff = getDifficulty(match.difficulty)
+  const iqMax = iq.health?.max_depth ?? 4
+  const depthIq = Math.min(iqMax, iqDepth ?? iq.health?.default_depth ?? 3)
+  const levelName = coach ? `Depth ${depthIq}` : diff.label // what the opponent strip, PGN and saved game call the level
   const patch = (p: Partial<MatchSettings>) => setMatch((m) => ({ ...m, ...p }))
 
   const chess = useMemo(() => { const c = safeChess(startFen); sans.forEach((s) => c.move(s)); return c }, [startFen, sans])
@@ -103,11 +118,14 @@ export default function Play({ variant = 'stockfish' }: { variant?: 'stockfish' 
 
   /** Apply the chosen settings to the real engine, then begin the match. */
   const start = async () => {
-    const eng = engine.current
-    if (!eng || engineStatus !== 'ready') return
+    if (engineStatus !== 'ready') return
     setConfiguring(true); setMoveError('')
     try {
-      await eng.configure(match)
+      if (!coach) {
+        const eng = engine.current
+        if (!eng) return
+        await eng.configure(match)
+      }
       const c: Color = match.color === 'random' ? (Math.random() < 0.5 ? 'w' : 'b') : match.color
       reset(mode); setPlayerColor(c); setStarted(true)
     } catch (e) {
@@ -115,11 +133,43 @@ export default function Play({ variant = 'stockfish' }: { variant?: 'stockfish' 
     } finally { setConfiguring(false) }
   }
 
+  // CHESS-IQ replies (Play the Coach) whenever it is the engine's turn. The whole move list is sent so the server can
+  // replay and validate it; the cleanup aborts the request if the position changes, the game ends, or we unmount.
+  useEffect(() => {
+    if (!coach || mode !== 'stockfish' || !started || over || chess.turn() === playerColor || engineStatus !== 'ready') return
+    let live = true
+    const ctl = new AbortController()
+    const fenAtRequest = chess.fen()
+    setThinking(true); setMoveError('')
+    requestEngineMove({
+      start_fen: startFen === START_FEN ? null : startFen,
+      moves: hist.map((m) => m.from + m.to + (m.promotion ?? '')),
+      depth: depthIq,
+    }, ctl.signal).then((res) => {
+      if (!live) return
+      setThinking(false)
+      if (!res.best_move) { setMoveError(`The engine reports that the game is finished (${res.status.termination ?? 'no legal moves'}).`); return }
+      const c = new Chess(fenAtRequest)
+      try {
+        const m = c.move({ from: res.best_move.slice(0, 2), to: res.best_move.slice(2, 4), promotion: res.best_move[4] })
+        setSans((s) => [...s, m.san])
+        if (res.score) {
+          const pawns = res.score.mate != null ? Math.sign(res.score.mate) * 12 : (res.score.cp ?? 0) / 100
+          setEngineEval(pawns) // the API already reports White's point of view
+        }
+      } catch {
+        setMoveError(`CHESS-IQ returned a move (${res.best_move}) that is illegal in this position.`)
+      }
+    }).catch((e: Error) => { if (live && e.name !== 'AbortError') { setThinking(false); setMoveError(e.message) } })
+    return () => { live = false; ctl.abort() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coach, mode, started, over, chess, playerColor, engineStatus, depthIq])
+
   // Stockfish replies whenever it is the engine's turn. The effect cleanup cancels the search whenever
   // the position changes, the game ends, or the component unmounts, and `live` blocks stale results.
   useEffect(() => {
     const eng = engine.current
-    if (mode !== 'stockfish' || !started || over || chess.turn() === playerColor || engineStatus !== 'ready' || !eng) return
+    if (coach || mode !== 'stockfish' || !started || over || chess.turn() === playerColor || engineStatus !== 'ready' || !eng) return
     let live = true
     const fenAtRequest = chess.fen()
     const side = chess.turn()
@@ -164,11 +214,18 @@ export default function Play({ variant = 'stockfish' }: { variant?: 'stockfish' 
 
   // Persist finished game once
   useEffect(() => {
-    if (over && !saved.current && sans.length) {
-      saved.current = true
-      saveGame({ id: String(Date.now()), pgn: pgnText(), result: result!, opponent: mode === 'stockfish' ? `${opponent} ${diff.label}` : 'Local', date: new Date().toISOString() })
-    }
-  }, [over, sans.length, chess, result, mode, diff.label, saveGame])
+    if (!over || saved.current || !sans.length) return
+    saved.current = true
+    if (!user || (mode !== 'stockfish' && mode !== 'local')) return // games are stored per signed-in user, on the backend
+    const { code, termination } = gameResult(chess, { resigned, timedOut, agreed })
+    if (code === '*') return
+    saveGameRemote({
+      pgn: pgnText(), mode: mode === 'local' ? 'local' : coach ? 'coach' : 'stockfish', opponent: mode === 'local' ? 'Local' : opponent,
+      difficulty: mode === 'stockfish' && !coach ? match.difficulty : undefined,
+      player_color: mode === 'stockfish' ? playerColor : 'w', result: code, termination,
+    }).catch(() => undefined) // a failed save must never interrupt the game screen
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [over, sans.length, chess, user, mode])
 
   const onMove = (from: string, to: string, promotion?: string) => {
     if (over || !active) return false
@@ -184,10 +241,10 @@ export default function Play({ variant = 'stockfish' }: { variant?: 'stockfish' 
   const resign = () => { if (started && !over) { void engine.current?.cancel(); setResigned(mode === 'local' ? chess.turn() : playerColor) } }
   const draw = () => {
     if (mode !== 'stockfish') return say('Draw claims are handled between players.')
-    // Stockfish accepts only if its own evaluation says the position is about equal or worse for it.
+    // The engine accepts only if its own evaluation says the position is about equal or worse for it.
     const engineSide = playerColor === 'w' ? -1 : 1
-    if (engineEval !== null && engineEval * engineSide <= 0.2 && sans.length > 20) { setAgreed(true); say('Stockfish accepted the draw.') }
-    else say('Stockfish declined the draw offer.')
+    if (engineEval !== null && engineEval * engineSide <= 0.2 && sans.length > 20) { setAgreed(true); say(`${opponent} accepted the draw.`) }
+    else say(`${opponent} declined the draw offer.`)
   }
   const loadFen = () => {
     try { new Chess(fenInput.trim()); setFenError(''); reset('practice', fenInput.trim()) } catch { setFenError('That FEN is not valid. Check the six fields and try again.') }
@@ -195,7 +252,7 @@ export default function Play({ variant = 'stockfish' }: { variant?: 'stockfish' 
   const kind: GameKind = mode === 'stockfish' ? (coach ? 'coach' : 'stockfish') : mode === 'local' ? 'local' : 'free'
   const pgnText = () => buildPgn({
     startFen, sans, kind, playerColor: mode === 'stockfish' ? playerColor : 'w', resigned, timedOut, agreed,
-    level: mode === 'stockfish' ? `${diff.label}${diff.elo ? ` (≈${diff.elo} Elo)` : ''}` : undefined,
+    level: mode === 'stockfish' ? (coach ? `CHESS-IQ NNUE engine, search depth ${depthIq}` : `${diff.label}${diff.elo ? ` (≈${diff.elo} Elo)` : ''}`) : undefined,
   })
   const exportPgn = () => downloadText(pgnText(), `chessiq-${kind}-game.pgn`)
   const copyPgn = async () => {
@@ -210,8 +267,8 @@ export default function Play({ variant = 'stockfish' }: { variant?: 'stockfish' 
 
   const topColor: Color = orientation === 'w' ? 'b' : 'w'
   const botColor: Color = orientation === 'w' ? 'w' : 'b'
-  const nameOf = (c: Color) => mode === 'stockfish' ? (c === playerColor ? 'You' : `${opponent} · ${diff.label}`) : mode === 'local' ? (c === 'w' ? 'Player 1' : 'Player 2') : c === 'w' ? 'White' : 'Black'
-  const subOf = (c: Color) => mode === 'stockfish' && c !== playerColor ? (thinking ? 'Thinking…' : engineStatus === 'loading' ? 'Loading engine…' : levelLabel(diff)) : c === 'w' ? 'White' : 'Black'
+  const nameOf = (c: Color) => mode === 'stockfish' ? (c === playerColor ? 'You' : `${opponent} · ${levelName}`) : mode === 'local' ? (c === 'w' ? 'Player 1' : 'Player 2') : c === 'w' ? 'White' : 'Black'
+  const subOf = (c: Color) => mode === 'stockfish' && c !== playerColor ? (thinking ? 'Thinking…' : engineStatus === 'loading' ? 'Loading engine…' : coach ? 'Custom neural engine' : levelLabel(diff)) : c === 'w' ? 'White' : 'Black'
   const strip = (c: Color) => {
     const lost = c === 'w' ? caps.b : caps.w
     const d = (c === 'w' ? 1 : -1) * mat
@@ -223,7 +280,7 @@ export default function Play({ variant = 'stockfish' }: { variant?: 'stockfish' 
 
   return (
     <div className="max-w-[1500px] mx-auto px-5 md:px-10 pt-24 md:pt-32 pb-16">
-      <PageHead title={coach ? 'Play the Coach' : 'Play'} sub={coach ? 'Match your skills against the AI Coach. Its moves are calculated by Stockfish at the strength you choose — then ask it to review the game.' : 'Play Stockfish, set up a position, or analyse freely. Every move is validated against the rules of chess.'} />
+      <PageHead title={coach ? 'Play the Coach' : 'Play'} sub={coach ? 'Match your skills against CHESS-IQ, our own neural-network chess engine. Choose how deeply it searches — then ask the Coach to review the game.' : 'Play Stockfish, set up a position, or analyse freely. Every move is validated against the rules of chess.'} />
       <div className="grid xl:grid-cols-[minmax(0,640px)_minmax(0,460px)] xl:justify-center gap-8 lg:gap-12">
         {/* Board column — capped so the board never dominates the screen, and centred */}
         <BoardColumn>
@@ -257,10 +314,10 @@ export default function Play({ variant = 'stockfish' }: { variant?: 'stockfish' 
                 <h3 className="display text-2xl">Match setup</h3>
                 <span className="flex items-center gap-2 text-xs text-ash">
                   <i className={`w-1.5 h-1.5 rounded-full ${engineStatus === 'ready' ? 'bg-emerald-400' : engineStatus === 'error' ? 'bg-blood-400' : 'bg-ash animate-pulseDot'}`} />
-                  {engineStatus === 'ready' ? 'Stockfish 19 ready' : engineStatus === 'error' ? 'Engine error' : 'Loading Stockfish…'}
+                  {engineStatus === 'ready' ? (coach ? 'CHESS-IQ ready' : 'Stockfish 19 ready') : engineStatus === 'error' ? 'Engine error' : coach ? 'Waking CHESS-IQ…' : 'Loading Stockfish…'}
                 </span>
               </div>
-              {coach && <p className="label -mt-2">Choose how strong the Coach plays. Its moves come from Stockfish, and you can ask it to review the game afterwards.</p>}
+              {coach && <p className="label -mt-2">CHESS-IQ runs on our server. If it has been idle it can take up to a minute to wake up. You can ask the Coach to review the game afterwards.</p>}
               {engineStatus === 'error' && (
                 <div className="border border-blood-700 bg-blood-900/40 p-3 text-sm">
                   <p className="text-blood-400">{engineError}</p>
@@ -268,6 +325,19 @@ export default function Play({ variant = 'stockfish' }: { variant?: 'stockfish' 
                 </div>
               )}
 
+              {coach && (
+                <div>
+                  <p className="label mb-2">Search depth</p>
+                  <div className="flex gap-2">
+                    {Array.from({ length: iqMax - 1 }, (_, i) => i + 2).map((d) => (
+                      <button key={d} onClick={() => setIqDepth(d)} className={chip(depthIq === d)}>{d}</button>
+                    ))}
+                  </div>
+                  <p className="label mt-2">Deeper search plays stronger but takes longer per move. Depth {iq.health?.default_depth ?? 3} is the balanced default; the server allows up to {iqMax}.</p>
+                </div>
+              )}
+
+              {!coach && <>
               <div>
                 <p className="label mb-2">Engine difficulty</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -297,6 +367,7 @@ export default function Play({ variant = 'stockfish' }: { variant?: 'stockfish' 
                   <div className="flex gap-2">{MOVE_TIMES.map((t) => <button key={t} className={chip(match.movetimeMs === t)} onClick={() => patch({ movetimeMs: t })}>{t < 1000 ? `${t} ms` : `${t / 1000} s`}</button>)}</div>
                 )}
               </div>
+              </>}
 
               <div><p className="label mb-2">Play as</p><div className="flex gap-2">{(['w', 'random', 'b'] as const).map((c) => <button key={c} onClick={() => patch({ color: c })} className={chip(match.color === c)}>{c === 'w' ? 'White' : c === 'b' ? 'Black' : 'Random'}</button>)}</div></div>
 
@@ -314,7 +385,7 @@ export default function Play({ variant = 'stockfish' }: { variant?: 'stockfish' 
               <div><p className="label mb-2">Time control</p><div className="flex gap-2 flex-wrap">{TIMES.map((t, i) => <button key={t.l} onClick={() => { setTimeIdx(i); setClocks({ w: t.s, b: t.s }) }} className={`chip ${timeIdx === i ? 'chip-on' : ''}`}>{t.l}</button>)}</div></div>
 
               <button className="btn btn-solid w-full disabled:opacity-50 disabled:cursor-not-allowed" disabled={engineStatus !== 'ready' || configuring} onClick={start}>
-                {configuring ? 'Applying settings…' : engineStatus === 'loading' ? 'Loading Stockfish…' : 'Start game'}
+                {configuring ? 'Applying settings…' : engineStatus === 'loading' ? (coach ? 'Waking CHESS-IQ…' : 'Loading Stockfish…') : 'Start game'}
               </button>
             </motion.div>
           )}
@@ -342,8 +413,8 @@ export default function Play({ variant = 'stockfish' }: { variant?: 'stockfish' 
                 <span className="display text-xl">Moves</span>
                 {mode === 'stockfish' && (
                   <span className="flex items-center gap-3 text-xs text-ash">
-                    <span className="flex items-center gap-2"><i className={`w-1.5 h-1.5 rounded-full ${thinking ? 'bg-blood-400 animate-pulseDot' : 'bg-ash'}`} />{thinking ? `${opponent} is thinking` : `${diff.label} · ${match.searchMode === 'depth' ? `depth ${match.depth}` : `${match.movetimeMs} ms`}`}</span>
-                    {thinking && <button className="chip !py-0.5" onClick={() => engine.current?.stop()}>Move now</button>}
+                    <span className="flex items-center gap-2"><i className={`w-1.5 h-1.5 rounded-full ${thinking ? 'bg-blood-400 animate-pulseDot' : 'bg-ash'}`} />{thinking ? `${opponent} is thinking` : coach ? `Depth ${depthIq}` : `${diff.label} · ${match.searchMode === 'depth' ? `depth ${match.depth}` : `${match.movetimeMs} ms`}`}</span>
+                    {thinking && !coach && <button className="chip !py-0.5" onClick={() => engine.current?.stop()}>Move now</button>}
                   </span>
                 )}
               </div>

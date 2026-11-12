@@ -46,7 +46,7 @@ export interface GameRow { id: string; played_at: string; mode: string; opponent
 export interface Stats {
   profile: Profile
   games: { total: number; wins: number; losses: number; draws: number; win_rate_pct: number | null }
-  by_difficulty: { mode: string; difficulty: string; games: number; wins: number }[]
+  by_difficulty: { mode: string; difficulty: string | null; games: number; wins: number }[]
   recent_games: GameRow[]
   puzzles: { attempts: number; puzzles_solved: number; accuracy_pct: number | null; avg_solve_seconds: number; rating: number }
   streak_days: number
