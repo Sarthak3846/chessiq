@@ -8,7 +8,9 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from .config import settings
+import logging
 
+logger = logging.getLogger(__name__)
 pool: Optional[AsyncConnectionPool] = None
 
 
@@ -36,9 +38,15 @@ async def conn() -> AsyncIterator[Any]:
             yield c
     except HTTPException:
         raise
-    except Exception as e:  # connection refused, pool timeout, etc.
-        if e.__class__.__module__.startswith("psycopg") and not e.__class__.__name__.endswith(("IntegrityError", "DataError")):
-            raise HTTPException(503, "The database is temporarily unavailable. Please try again.") from e
+    except Exception as e:
+        logger.exception("PostgreSQL database operation failed")
+
+        if e.__class__.__module__.startswith("psycopg"):
+            raise HTTPException(
+                503,
+                "The database is temporarily unavailable. Please try again."
+            ) from e
+
         raise
 
 
@@ -56,4 +64,4 @@ async def fetch_one(sql: str, *args: Any) -> Optional[dict]:
 
 async def execute(sql: str, *args: Any) -> None:
     async with conn() as c:
-        await c.execute(sql, args)
+        await c.execute(sql, args) 

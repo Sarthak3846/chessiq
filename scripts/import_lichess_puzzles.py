@@ -15,7 +15,7 @@ import io
 import os
 import random
 import sys
-
+from contextlib import contextmanager
 import chess
 import httpx
 import psycopg
@@ -27,18 +27,52 @@ SQL = """insert into puzzles (id, fen, moves, rating, rating_deviation, populari
          values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) on conflict (id) do nothing"""
 
 
+
+@contextmanager
 def open_text(source: str):
-    """Returns a text stream for a local .csv / .csv.zst file or an http(s) URL (streamed, never fully in memory)."""
     if source.startswith("http"):
-        resp = httpx.stream("GET", source, follow_redirects=True, timeout=60)
-        r = resp.__enter__()
-        r.raise_for_status()
-        raw = io.BufferedReader(_IterStream(r.iter_raw()))
+        with httpx.stream(
+            "GET",
+            source,
+            follow_redirects=True,
+            timeout=60
+        ) as response:
+            response.raise_for_status()
+
+            raw = io.BufferedReader(
+                _IterStream(response.iter_raw())
+            )
+
+            if source.endswith(".zst"):
+                raw = zstandard.ZstdDecompressor().stream_reader(raw)
+
+            text_stream = io.TextIOWrapper(
+                raw,
+                encoding="utf-8",
+                newline=""
+            )
+
+            try:
+                yield text_stream
+            finally:
+                text_stream.close()
+
     else:
-        raw = open(source, "rb")
-    if source.endswith(".zst"):
-        raw = zstandard.ZstdDecompressor().stream_reader(raw)
-    return io.TextIOWrapper(raw, encoding="utf-8", newline="")
+        with open(source, "rb") as raw:
+            if source.endswith(".zst"):
+                raw = zstandard.ZstdDecompressor().stream_reader(raw)
+
+            text_stream = io.TextIOWrapper(
+                raw,
+                encoding="utf-8",
+                newline=""
+            )
+
+            try:
+                yield text_stream
+            finally:
+                text_stream.close()
+
 
 
 class _IterStream(io.RawIOBase):
@@ -87,24 +121,25 @@ def main() -> int:
     batch: list[tuple] = []
     conn = None if a.dry_run else psycopg.connect(url, prepare_threshold=None)
     try:
-        for row in csv.DictReader(open_text(a.source)):
-            if kept >= a.limit:
-                break
-            if int(row["Popularity"]) < a.min_popularity or int(row["NbPlays"]) < a.min_plays or random.random() > a.sample:
-                continue
-            moves = row["Moves"].split()
-            if not valid(row["FEN"], moves):
-                skipped += 1
-                continue
-            batch.append((row["PuzzleId"], row["FEN"], moves, int(row["Rating"]), int(row["RatingDeviation"] or 0), int(row["Popularity"]), int(row["NbPlays"]),
-                          row["Themes"].split(), row["GameUrl"], row["OpeningTags"].split()))
-            kept += 1
-            if len(batch) >= 1000 and conn:
-                with conn.cursor() as cur:
-                    cur.executemany(SQL, batch)
-                conn.commit()
-                batch = []
-                print(f"\r{kept} puzzles…", end="", flush=True)
+        with open_text(a.source) as source_file:
+            for row in csv.DictReader(source_file):
+                if kept >= a.limit:
+                    break
+                if int(row["Popularity"]) < a.min_popularity or int(row["NbPlays"]) < a.min_plays or random.random() > a.sample:
+                    continue
+                moves = row["Moves"].split()
+                if not valid(row["FEN"], moves):
+                    skipped += 1
+                    continue
+                batch.append((row["PuzzleId"], row["FEN"], moves, int(row["Rating"]), int(row["RatingDeviation"] or 0), int(row["Popularity"]), int(row["NbPlays"]),
+                            row["Themes"].split(), row["GameUrl"], row["OpeningTags"].split()))
+                kept += 1
+                if len(batch) >= 1000 and conn:
+                    with conn.cursor() as cur:
+                        cur.executemany(SQL, batch)
+                    conn.commit()
+                    batch = []
+                    print(f"\r{kept} puzzles…", end="", flush=True)
         if batch and conn:
             with conn.cursor() as cur:
                 cur.executemany(SQL, batch)
