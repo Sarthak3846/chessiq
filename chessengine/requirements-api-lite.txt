@@ -1,0 +1,7 @@
+# Runtime dependencies for the PyTorch-free deployment (Render free plan, Docker image).
+# No torch: the network runs in NumPy from checkpoints/model_d_square.npz (see api/export_numpy_weights.py).
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+chess>=1.10
+numpy>=1.26

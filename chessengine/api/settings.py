@@ -32,6 +32,12 @@ def _checkpoint_path() -> Path:
     return path if path.is_absolute() else (ENGINE_ROOT / path)
 
 
+def _weights_path() -> Path:
+    raw = _env("ENGINE_WEIGHTS_NPZ", "checkpoints/model_d_square.npz")
+    path = Path(raw)
+    return path if path.is_absolute() else (ENGINE_ROOT / path)
+
+
 def _origins() -> tuple[str, ...]:
     raw = _env("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
     return tuple(o.strip().rstrip("/") for o in raw.split(",") if o.strip())
@@ -41,6 +47,10 @@ def _origins() -> tuple[str, ...]:
 class Settings:
     # Model
     checkpoint_path: Path = field(default_factory=_checkpoint_path)
+    # Runtime: "numpy" = PyTorch-free (reads the .npz made by api/export_numpy_weights.py; small and fast to start),
+    # "torch" = the original evaluator and .pth file, "auto" = numpy if the .npz exists, otherwise torch.
+    runtime: str = field(default_factory=lambda: _env("ENGINE_RUNTIME", "auto").lower())
+    weights_npz_path: Path = field(default_factory=_weights_path)
     # Search depth. The default is deliberately small: the search is pure Python and depth 6 can take minutes.
     default_depth: int = field(default_factory=lambda: _int("ENGINE_DEFAULT_DEPTH", 3))
     max_depth: int = field(default_factory=lambda: _int("ENGINE_MAX_DEPTH", 4))
@@ -68,6 +78,8 @@ class Settings:
 
 def load_settings() -> Settings:
     s = Settings()
+    if s.runtime not in ("auto", "numpy", "torch"):
+        raise RuntimeError(f"Invalid ENGINE_RUNTIME={s.runtime!r}. Use auto, numpy or torch.")
     if s.default_depth < 1 or s.max_depth < 1 or s.default_depth > s.max_depth:
         raise RuntimeError(
             f"Invalid depth configuration: ENGINE_DEFAULT_DEPTH={s.default_depth}, ENGINE_MAX_DEPTH={s.max_depth}. "

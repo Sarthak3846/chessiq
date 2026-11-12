@@ -127,6 +127,7 @@ class EngineService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.evaluator = None
+        self.model_file: str = ""
         self.error: Optional[str] = None
         self.loaded_in: float = 0.0
         self._pool: Optional[ThreadPoolExecutor] = None
@@ -137,27 +138,40 @@ class EngineService:
 
     # ------------------------------------------------------------------ lifecycle
     def load(self) -> None:
-        """Load the checkpoint once. Never raises: failures are stored so /api/health can report them."""
+        """Load the model once. Never raises: failures are stored so /api/health can report them."""
         started = time.perf_counter()
         try:
-            import torch
+            cfg = self.settings
+            use_numpy = cfg.runtime == "numpy" or (cfg.runtime == "auto" and cfg.weights_npz_path.is_file())
 
-            torch.set_num_threads(self.settings.torch_threads)
-            path = self.settings.checkpoint_path
-            if not path.is_file():
-                raise FileNotFoundError(f"Checkpoint not found: {path}")
+            if use_numpy:
+                # PyTorch-free path: the existing search code runs unchanged on a NumPy evaluator.
+                if not cfg.weights_npz_path.is_file():
+                    raise FileNotFoundError(
+                        f"Weights file not found: {cfg.weights_npz_path}. Create it with: python -m api.export_numpy_weights"
+                    )
+                from .numpy_evaluator import NumpyEvaluator, install_as_evaluator_module
 
-            from src.engine.evaluator import NNUEEvaluator   # existing class, unchanged
+                install_as_evaluator_module()     # must happen before src.engine.search is imported
+                self.evaluator = NumpyEvaluator(str(cfg.weights_npz_path))
+                self.model_file = cfg.weights_npz_path.name
+            else:
+                import torch
 
-            self.evaluator = NNUEEvaluator(checkpoint_path=str(path))
+                torch.set_num_threads(cfg.torch_threads)
+                if not cfg.checkpoint_path.is_file():
+                    raise FileNotFoundError(f"Checkpoint not found: {cfg.checkpoint_path}")
+                from src.engine.evaluator import NNUEEvaluator   # existing class, unchanged
+
+                self.evaluator = NNUEEvaluator(checkpoint_path=str(cfg.checkpoint_path))
+                self.model_file = cfg.checkpoint_path.name
+
             # Warm-up: proves the model + feature encoder work before we report ready.
             self.evaluator.evaluate_white(chess.STARTING_FEN)
             self.error = None
-            self._pool = ThreadPoolExecutor(
-                max_workers=self.settings.max_concurrent_searches, thread_name_prefix="chessiq-search"
-            )
+            self._pool = ThreadPoolExecutor(max_workers=cfg.max_concurrent_searches, thread_name_prefix="chessiq-search")
             self.loaded_in = time.perf_counter() - started
-            log.info("CHESS-IQ model ready in %.2fs (device=%s)", self.loaded_in, self.evaluator.device)
+            log.info("CHESS-IQ model ready in %.2fs (%s, %s)", self.loaded_in, self.model_file, self.evaluator.device)
         except Exception as exc:  # noqa: BLE001 - reported through /api/health
             self.evaluator = None
             self.error = f"{type(exc).__name__}: {exc}"
@@ -177,7 +191,7 @@ class EngineService:
         return {
             "name": "CHESS-IQ NNUE",
             "device": str(ev.device) if ev is not None else None,
-            "checkpoint": self.settings.checkpoint_path.name,
+            "checkpoint": self.model_file or self.settings.checkpoint_path.name,
             "checkpoint_epoch": getattr(ev, "checkpoint_epoch", None) if ev is not None else None,
         }
 

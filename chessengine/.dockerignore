@@ -8,3 +8,5 @@ venv/
 *.csv
 *.log
 api/tests/
+api/export_numpy_weights.py
+checkpoints/*.pth
