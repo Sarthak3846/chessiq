@@ -280,7 +280,7 @@ export default function Play({ variant = 'stockfish' }: { variant?: 'stockfish' 
 
   return (
     <div className="max-w-[1500px] mx-auto px-5 md:px-10 pt-24 md:pt-32 pb-16">
-      <PageHead title={coach ? 'Play the Coach' : 'Play'} sub={coach ? 'Match your skills against CHESS-IQ, our own neural-network chess engine. Choose how deeply it searches — then ask the Coach to review the game.' : 'Play Stockfish, set up a position, or analyse freely. Every move is validated against the rules of chess.'} />
+      <PageHead title={coach ? 'Play Against My Custom Engine' : 'Play'} sub={coach ? 'Match your skills against CHESS-IQ, our own neural-network chess engine. Choose how deeply it searches — then ask the Coach to review the game.' : 'Play Stockfish, set up a position, or analyse freely. Every move is validated against the rules of chess.'} />
       <div className="grid xl:grid-cols-[minmax(0,640px)_minmax(0,460px)] xl:justify-center gap-8 lg:gap-12">
         {/* Board column — capped so the board never dominates the screen, and centred */}
         <BoardColumn>

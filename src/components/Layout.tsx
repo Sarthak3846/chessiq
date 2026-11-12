@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useAuth } from '../store/auth'
 
 const links = [
-  { to: '/', label: 'Home' }, { to: '/play', label: 'Play' }, { to: '/play-coach', label: 'Play Coach' },
+  { to: '/', label: 'Home' }, { to: '/play', label: 'Play' }, { to: '/play-coach', label: 'Play Against My Custom Engine' },
   { to: '/analysis', label: 'Analysis' }, { to: '/puzzles', label: 'Puzzles' }, { to: '/openings', label: 'Openings' }, { to: '/coach', label: 'AI Coach' },
 ]
 
