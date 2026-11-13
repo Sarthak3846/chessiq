@@ -54,11 +54,11 @@ export default function Profile() {
             <div className="flex flex-wrap gap-2">
               {LEVELS.map((l) => <button key={l.id} onClick={() => { setPreferredDifficulty(l.id); setStats({ ...stats, profile: { ...stats.profile, preferred_difficulty: l.id } }) }} className={`chip ${stats.profile.preferred_difficulty === l.id ? 'chip-on' : ''}`}>{l.label}</button>)}
             </div>
-            <p className="label mt-2">Used as the default when you start a match against Stockfish or the Coach.</p>
+            <p className="label mt-2">Used as the default when you start a match against Stockfish or my custom engine.</p>
           </Section>
 
-          <Section title="Recent games" right={<Link to="/play-coach" className="text-sm text-blood-400 hover:text-bone transition-colors">Play the Coach</Link>}>
-            {stats.recent_games.length === 0 ? <p className="text-ash">No saved games yet. Finish a match against Stockfish or the Coach while signed in and it will appear here.</p> : (
+          <Section title="Recent games" right={<Link to="/play-coach" className="text-sm text-blood-400 hover:text-bone transition-colors">Play My Custom Engine</Link>}>
+            {stats.recent_games.length === 0 ? <p className="text-ash">No saved games yet. Finish a match against Stockfish or my custom engine while signed in and it will appear here.</p> : (
               <div className="divide-y divide-white/10">
                 {stats.recent_games.map((r) => (
                   <button key={r.id} onClick={() => void review(r.id)} className="w-full grid grid-cols-[1fr_auto] md:grid-cols-[2fr_1fr_1fr_auto] gap-3 py-3 px-2 -mx-2 text-left items-center hover:bg-white/[0.03] transition-colors">

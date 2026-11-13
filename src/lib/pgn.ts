@@ -34,8 +34,8 @@ export function buildPgn(i: PgnInput): string {
   const { code, termination } = gameResult(c, i)
   const outcome = code === '1-0' ? 'White win' : code === '0-1' ? 'Black win' : code === '1/2-1/2' ? 'Draw' : 'Unfinished'
 
-  const opponent = i.kind === 'coach' ? 'AI Coach' : i.kind === 'stockfish' ? 'Stockfish' : null
-  const gameType = i.kind === 'coach' ? 'Match against AI Coach' : i.kind === 'stockfish' ? 'Match against Stockfish' : i.kind === 'local' ? 'Local two-player game' : 'Free play'
+  const opponent = i.kind === 'coach' ? 'My custom engine' : i.kind === 'stockfish' ? 'Stockfish' : null
+  const gameType = i.kind === 'coach' ? 'Match against my custom engine' : i.kind === 'stockfish' ? 'Match against Stockfish' : i.kind === 'local' ? 'Local two-player game' : 'Free play'
   const player = 'Player'
   const white = opponent ? (i.playerColor === 'w' ? player : opponent) : i.kind === 'local' ? 'Player 1' : player
   const black = opponent ? (i.playerColor === 'b' ? player : opponent) : i.kind === 'local' ? 'Player 2' : player

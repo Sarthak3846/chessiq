@@ -114,8 +114,8 @@ export default function Home() {
       <div className="max-w-[1500px] mx-auto px-5 md:px-10 py-14">
         <Link to="/play-coach" className="group relative block overflow-hidden border border-blood-600/60 bg-gradient-to-r from-blood-800/60 via-coal to-ink p-6 md:p-10 transition-all hover:border-blood-400">
           <img src="/pieces/wN.svg" alt="" className="absolute right-4 md:right-12 top-1/2 -translate-y-1/2 h-40 md:h-56 opacity-90 transition-transform duration-500 group-hover:scale-105 group-hover:-rotate-3" />
-          <p className="label">New · Play against the AI Coach</p>
-          <h2 className="display text-4xl md:text-6xl mt-2 max-w-xl">Challenge the Coach</h2>
+          <p className="label">New · Play against my custom engine</p>
+          <h2 className="display text-4xl md:text-6xl mt-2 max-w-xl">Challenge My Custom Engine</h2>
           <p className="text-ash mt-3 max-w-lg">A full game against Stockfish at the level you choose, then a move-by-move review from the Coach.</p>
           <span className="btn btn-solid mt-6 pointer-events-none">Start a game<Arrow /></span>
         </Link>
@@ -161,7 +161,7 @@ export default function Home() {
               <div>
                 <h3 className="display text-4xl mb-4">Quick play</h3>
                 <div className="grid sm:grid-cols-2 gap-3">
-                  {[['Play vs Coach', 'Adjustable strength, full game review', '/play-coach'], ['Play vs Stockfish', 'Choose a level, pick a colour', '/play'], ['Analysis board', 'Explore any position freely', '/play'], ['Review a game', 'Import a PGN and see every mistake', '/analysis']].map(([a, b, to]) => (
+                  {[['Play vs My Custom Engine', 'Adjustable search depth, full game review', '/play-coach'], ['Play vs Stockfish', 'Choose a level, pick a colour', '/play'], ['Analysis board', 'Explore any position freely', '/play'], ['Review a game', 'Import a PGN and see every mistake', '/analysis']].map(([a, b, to]) => (
                     <Link key={a} to={to} className="group border hair p-4 hover:border-blood-500 hover:bg-blood-900/30 transition-all flex justify-between items-center">
                       <span><span className="block">{a}</span><span className="label">{b}</span></span>
                       <Arrow className="transition-transform group-hover:translate-x-1 text-blood-400" />
