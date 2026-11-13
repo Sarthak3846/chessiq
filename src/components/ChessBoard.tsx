@@ -1,7 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import type { Square } from 'chess.js'
 import { pieceUrl, safeChess } from '../lib/chess'
+import { toggleShape, type Shape } from '../lib/arrows'
+import BoardArrows from './BoardArrows'
 
 export interface BoardProps {
   fen: string
@@ -22,7 +24,10 @@ export default function ChessBoard({ fen, orientation = 'w', canMove = 'none', l
   const [selected, setSelected] = useState<Square | null>(null)
   const [shake, setShake] = useState(0)
   const [prevFen, setPrevFen] = useState(fen)
-  if (prevFen !== fen) { setPrevFen(fen); setSelected(null) }
+  const [shapes, setShapes] = useState<Shape[]>([]) // user-drawn arrows / circles
+  const [draft, setDraft] = useState<Shape | null>(null) // the one being dragged right now
+  const gridRef = useRef<HTMLDivElement>(null)
+  if (prevFen !== fen) { setPrevFen(fen); setSelected(null); setShapes([]); setDraft(null) }
 
   const targets = useMemo(() => {
     if (!selected) return new Map<string, boolean>()
@@ -52,6 +57,17 @@ export default function ChessBoard({ fen, orientation = 'w', canMove = 'none', l
   const rows = orientation === 'w' ? [0, 1, 2, 3, 4, 5, 6, 7] : [7, 6, 5, 4, 3, 2, 1, 0] // row index into board() => rank 8..1
   const colOf = (sq: string) => cols.indexOf(FILES.indexOf(sq[0]))
   const rowOf = (sq: string) => rows.indexOf(8 - Number(sq[1]))
+  const centre = (sq: string) => ({ x: colOf(sq) + 0.5, y: rowOf(sq) + 0.5 })
+
+  /** Square under the pointer, using the displayed (possibly flipped) layout. */
+  const squareAt = (e: { clientX: number; clientY: number }): string | null => {
+    const el = gridRef.current
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    const c = Math.floor(((e.clientX - r.left) / r.width) * 8), rw = Math.floor(((e.clientY - r.top) / r.height) * 8)
+    if (c < 0 || c > 7 || rw < 0 || rw > 7) return null
+    return `${FILES[cols[c]]}${8 - rows[rw]}`
+  }
 
   return (
     <motion.div
@@ -60,7 +76,18 @@ export default function ChessBoard({ fen, orientation = 'w', canMove = 'none', l
       transition={{ duration: 0.35 }}
       className={`relative w-full aspect-square p-[clamp(6px,1.4vw,14px)] bg-gradient-to-br from-blood-800 via-coal to-ink glow-red ${className}`}
     >
-      <div className="relative grid grid-cols-8 grid-rows-8 w-full h-full select-none shadow-[0_20px_60px_-10px_rgba(0,0,0,.9)]">
+      <div
+        ref={gridRef}
+        className="relative grid grid-cols-8 grid-rows-8 w-full h-full select-none shadow-[0_20px_60px_-10px_rgba(0,0,0,.9)]"
+        onContextMenu={(e) => e.preventDefault()}
+        onPointerDown={(e) => {
+          if (e.button === 2) { const sq = squareAt(e); if (sq) { e.currentTarget.setPointerCapture(e.pointerId); setDraft({ from: sq, to: sq }) } }
+          else if (e.button === 0) setShapes((s) => (s.length ? [] : s)) // a normal click clears the drawings
+        }}
+        onPointerMove={(e) => { if (!draft) return; const sq = squareAt(e); if (sq && sq !== draft.to) setDraft({ ...draft, to: sq }) }}
+        onPointerUp={(e) => { if (e.button !== 2 || !draft) return; const d = draft; setDraft(null); setShapes((s) => toggleShape(s, d)) }}
+        onPointerCancel={() => setDraft(null)}
+      >
         {rows.map((r) => cols.map((f) => {
           const sq = `${FILES[f]}${8 - r}` as Square
           const p = board[r][f]
@@ -113,6 +140,7 @@ export default function ChessBoard({ fen, orientation = 'w', canMove = 'none', l
             </div>
           )
         }))}
+        <BoardArrows shapes={shapes} draft={draft} centre={centre} />
       </div>
     </motion.div>
   )
