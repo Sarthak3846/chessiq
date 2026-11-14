@@ -164,11 +164,34 @@ def test_database_row_level_security(users):
                 c.execute("set local role authenticated"); c.execute("insert into puzzles (id, fen, moves, rating) values ('HACK','x','{a}',1)")
 
 
+
 # ───────────── puzzles ─────────────
 def test_puzzle_import_and_api(client, users):
     a, b = users
-    out = subprocess.run([sys.executable, "scripts/import_lichess_puzzles.py", "--source", "tests/fixtures/puzzles_synthetic.csv", "--sample", "1", "--min-popularity", "0", "--min-plays", "0"], cwd=ROOT, capture_output=True, text=True)
+
+    script = ROOT.parent / "scripts" / "import_lichess_puzzles.py"
+    fixture = ROOT / "tests" / "fixtures" / "puzzles_synthetic.csv"
+
+    out = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--source",
+            str(fixture),
+            "--sample",
+            "1",
+            "--min-popularity",
+            "0",
+            "--min-plays",
+            "0",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
     assert out.returncode == 0 and "Imported 2 puzzles" in out.stdout, out.stderr
+
     p = client.get("/api/puzzles/next?themes=backRankMate").json()
     assert p["id"] == "TST01" and p["moves"] == ["h7h6", "d1d8"] and p["attribution"].startswith("Lichess")
     assert client.get("/api/puzzles/next?min_rating=850&max_rating=1000").json()["id"] == "TST02"
@@ -177,10 +200,21 @@ def test_puzzle_import_and_api(client, users):
     assert client.get("/api/puzzles/daily").json()["id"] in ("TST01", "TST02")
     assert client.get("/api/puzzles/NOPE").status_code == 404
     assert client.post("/api/puzzles/TST01/attempts", json={"solved": True}).status_code == 401
-    r1 = client.post("/api/puzzles/TST01/attempts", json={"solved": True, "time_ms": 4000}, headers=hdr(a)).json()
+
+    r1 = client.post(
+        "/api/puzzles/TST01/attempts",
+        json={"solved": True, "time_ms": 4000},
+        headers=hdr(a),
+    ).json()
     assert r1["delta"] > 0 and r1["rating"] == 1200 + r1["delta"]
-    r2 = client.post("/api/puzzles/TST01/attempts", json={"solved": True}, headers=hdr(a)).json()
-    assert r2["delta"] == 0                                                                           # retries don't farm rating
+
+    r2 = client.post(
+        "/api/puzzles/TST01/attempts",
+        json={"solved": True},
+        headers=hdr(a),
+    ).json()
+    assert r2["delta"] == 0  # retries don't farm rating
+
     st = client.get("/api/me/stats", headers=hdr(a)).json()["puzzles"]
     assert st["attempts"] == 2 and st["puzzles_solved"] == 1 and st["accuracy_pct"] == 100
     assert client.get("/api/me/stats", headers=hdr(b)).json()["puzzles"]["attempts"] == 0
