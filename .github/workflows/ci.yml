@@ -1,0 +1,190 @@
+
+name: ChessIQ CI
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chessiq-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # --------------------------------------------------
+  # FRONTEND
+  # --------------------------------------------------
+
+  frontend:
+    name: Frontend - TypeScript and Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      - name: Production build
+        run: npm run build
+
+
+  # --------------------------------------------------
+  # MAIN FASTAPI BACKEND
+  # --------------------------------------------------
+
+  backend:
+    name: Backend - Integration Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: chessiq
+        ports:
+          - 5432:5432
+
+        options: >-
+          --health-cmd "pg_isready -U postgres -d chessiq"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/chessiq
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/chessiq
+
+      SUPABASE_JWT_SECRET: test-jwt-secret-test-jwt-secret-1234
+      SUPABASE_URL: ""
+
+      GROQ_API_KEY: groq-test
+      GEMINI_API_KEY: gemini-test
+
+      STOCKFISH_PATH: /usr/games/stockfish
+      CORS_ORIGINS: http://localhost:5173
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install Stockfish
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y stockfish
+          test -x /usr/games/stockfish
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Initialize local Supabase-compatible database
+        working-directory: backend
+        run: |
+          PGPASSWORD=postgres psql \
+            -h localhost \
+            -U postgres \
+            -d chessiq \
+            -v ON_ERROR_STOP=1 \
+            -f tests/supabase_local_bootstrap.sql
+
+          PGPASSWORD=postgres psql \
+            -h localhost \
+            -U postgres \
+            -d chessiq \
+            -v ON_ERROR_STOP=1 \
+            -f sql/schema.sql
+
+      - name: Run backend tests
+        working-directory: backend
+        run: |
+          python -m pytest tests/ -v
+
+
+  # --------------------------------------------------
+  # CUSTOM CHESS ENGINE
+  # --------------------------------------------------
+
+  chess-engine:
+    name: Custom Engine - API Tests
+    runs-on: ubuntu-latest
+
+    env:
+      ENGINE_RUNTIME: numpy
+      ENGINE_DEFAULT_DEPTH: 3
+      ENGINE_MAX_DEPTH: 4
+      ENGINE_MAX_CONCURRENT: 2
+      ENGINE_MAX_QUEUE: 8
+      CORS_ORIGINS: http://localhost:5173,https://chessiq.vercel.app
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: chessengine/requirements-api-dev.txt
+
+      - name: Install engine dependencies
+        working-directory: chessengine
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-api-dev.txt
+
+      - name: Run custom engine tests
+        working-directory: chessengine
+        run: |
+          python -m pytest api/test/ -v
+
+
+  # --------------------------------------------------
+  # PIPELINE SUMMARY
+  # --------------------------------------------------
+
+  ci-success:
+    name: CI - All Checks Passed
+    runs-on: ubuntu-latest
+
+    needs:
+      - frontend
+      - backend
+      - chess-engine
+
+    steps:
+      - name: Report success
+        run: echo "All ChessIQ CI checks passed successfully."
