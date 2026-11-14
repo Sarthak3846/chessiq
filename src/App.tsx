@@ -1,4 +1,5 @@
 import { Route, Routes } from 'react-router-dom'
+import { Analytics } from '@vercel/analytics/react'
 import Layout from './components/Layout'
 import Home from './pages/Home'
 import Play from './pages/Play'
@@ -12,19 +13,22 @@ import Analysis from './pages/Analysis'
 
 export default function App() {
   return (
-    <Routes>
-      <Route element={<Layout />}>
-        <Route index element={<Home />} />
-        <Route path="play" element={<Play />} />
-        <Route path="play-coach" element={<PlayCoach />} />
-        <Route path="login" element={<Login />} />
-        <Route path="profile" element={<Profile />} />
-        <Route path="coach" element={<Coach />} />
-        <Route path="puzzles" element={<Puzzles />} />
-        <Route path="openings" element={<Openings />} />
-        <Route path="analysis" element={<Analysis />} />
-        <Route path="*" element={<Home />} />
-      </Route>
-    </Routes>
+    <>
+      <Routes>
+        <Route element={<Layout />}>
+          <Route index element={<Home />} />
+          <Route path="play" element={<Play />} />
+          <Route path="play-coach" element={<PlayCoach />} />
+          <Route path="login" element={<Login />} />
+          <Route path="profile" element={<Profile />} />
+          <Route path="coach" element={<Coach />} />
+          <Route path="puzzles" element={<Puzzles />} />
+          <Route path="openings" element={<Openings />} />
+          <Route path="analysis" element={<Analysis />} />
+          <Route path="*" element={<Home />} />
+        </Route>
+      </Routes>
+      <Analytics />
+    </>
   )
 }
