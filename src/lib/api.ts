@@ -144,3 +144,17 @@ export interface Health { status: string; stockfish: boolean; llm: { providers: 
 export async function getHealth(): Promise<Health | null> {
   try { const r = await fetch(`${API}/api/health`); return r.ok ? await r.json() : null } catch { return null }
 }
+
+
+// ───── game review (per-move Stockfish analysis + Coach explanations) ─────
+export type ReviewClass = 'best' | 'good' | 'inaccuracy' | 'mistake' | 'blunder'
+export interface ReviewPly {
+  ply: number; move_number: string; by: 'w' | 'b'; san: string; uci: string; phase: string
+  cp_before: number; cp_after: number; eval_before: string; eval_after: string
+  cp_loss: number; classification: ReviewClass; is_engine_best: boolean
+  best_san: string | null; best_uci: string | null; best_line: string[]; reply_san: string | null; reply_line: string[]
+}
+export interface GameReview { game_id: string; start_cp: number; start_eval: string; plies: ReviewPly[]; total_plies: number; truncated: boolean; avg_cp_loss: { w: number; b: number } }
+export const reviewGame = (pgn: string) => request<GameReview>('/api/review', { method: 'POST', body: { pgn } })
+export const explainMove = (pgn: string, ply: number, mode: 'short' | 'deep') =>
+  request<{ text: string; provider: string | null; cached: boolean }>('/api/review/explain', { method: 'POST', body: { pgn, ply, mode } })

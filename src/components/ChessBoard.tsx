@@ -12,13 +12,15 @@ export interface BoardProps {
   canMove?: 'w' | 'b' | 'both' | 'none'
   lastMove?: { from: string; to: string } | null
   hint?: { from: string; to: string } | null
+  /** Programmatic arrows (e.g. the engine's suggestion). Drawn with the same style as user arrows; does not affect interaction. */
+  arrows?: Shape[]
   onMove?: (from: string, to: string, promotion?: string) => boolean
   className?: string
 }
 
 const FILES = 'abcdefgh'
 
-export default function ChessBoard({ fen, orientation = 'w', canMove = 'none', lastMove, hint, onMove, className = '' }: BoardProps) {
+export default function ChessBoard({ fen, orientation = 'w', canMove = 'none', lastMove, hint, arrows, onMove, className = '' }: BoardProps) {
   const chess = useMemo(() => safeChess(fen), [fen])
   const board = chess.board()
   const [selected, setSelected] = useState<Square | null>(null)
@@ -140,7 +142,7 @@ export default function ChessBoard({ fen, orientation = 'w', canMove = 'none', l
             </div>
           )
         }))}
-        <BoardArrows shapes={shapes} draft={draft} centre={centre} />
+        <BoardArrows shapes={arrows?.length ? [...shapes, ...arrows] : shapes} draft={draft} centre={centre} />
       </div>
     </motion.div>
   )

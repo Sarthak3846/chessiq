@@ -7,6 +7,9 @@ import ChessBoard from '../components/ChessBoard'
 import EvalBar from '../components/EvalBar'
 import MoveList from '../components/MoveList'
 import { Modal, PageHead } from '../components/Ui'
+import CoachPanel from '../components/CoachPanel'
+import { useGameReview } from '../hooks/useGameReview'
+import type { GameReview, ReviewPly } from '../lib/api'
 import { OPERA_BEST, OPERA_EVAL, OPERA_NOTES, OPERA_SAN, OPERA_SPECIAL } from '../data/mock'
 import { START_FEN, fmtEval, materialEval } from '../lib/chess'
 import { useApp } from '../store/app'
@@ -17,7 +20,9 @@ const CLS: Record<Cls, { label: string; color: string }> = {
   good: { label: 'Good', color: '#9a908a' }, inaccuracy: { label: 'Inaccuracy', color: '#f5c451' }, mistake: { label: 'Mistake', color: '#f08a3c' }, blunder: { label: 'Blunder', color: '#e23b3b' },
 }
 
-interface Analysed { sans: string[]; evals: number[]; cls: Cls[]; loss: number[]; best: Record<number, string>; notes: Record<number, string>; fens: string[]; moves: { from: string; to: string }[]; headers: Record<string, string | null> }
+interface Analysed { sans: string[]; evals: number[]; cls: Cls[]; loss: number[]; best: Record<number, string>; notes: Record<number, string>; fens: string[]; moves: { from: string; to: string }[]; headers: Record<string, string | null>
+  /** Set when the numbers come from the real Stockfish review (otherwise they are estimates / the built-in sample). */
+  real?: boolean; covered?: number; start?: number; evalText?: string[]; rp?: ReviewPly[] }
 
 function classify(evals: number[], special: Record<number, Cls> = {}): { cls: Cls[]; loss: number[] } {
   const cls: Cls[] = [], loss: number[] = []
@@ -44,7 +49,29 @@ function build(pgn: string | null): Analysed | null {
   const { cls, loss } = classify(evals, mock ? OPERA_SPECIAL : {})
   return { sans: hist.map((m) => m.san), evals, cls, loss, best: mock ? OPERA_BEST : {}, notes: mock ? OPERA_NOTES : {}, fens, moves: hist.map((m) => ({ from: m.from, to: m.to })), headers: mock ? { Event: 'Paris Opera House', White: 'Paul Morphy', Black: 'Duke of Brunswick & Count Isouard', Date: '1858.??.??', Result: '1-0' } : c.getHeaders() }
 }
+/** Replace the estimated numbers with the real Stockfish review. Returns the original if the review does not match the game. */
+function applyReview(a: Analysed, r: GameReview): Analysed {
+  const n = Math.min(r.plies.length, a.sans.length)
+  if (n === 0 || r.plies.slice(0, n).some((p, i) => p.san !== a.sans[i])) return a
+  const evals: number[] = [], cls: Cls[] = [], loss: number[] = [], evalText: string[] = [], best: Record<number, string> = {}
+  a.sans.forEach((_, i) => {
+    const p = r.plies[i]
+    if (p) {
+      evals.push(Math.max(-10, Math.min(10, p.cp_after / 100))); cls.push(p.classification); loss.push(p.cp_loss / 100); evalText.push(p.eval_after)
+      if (!p.is_engine_best && p.best_san) best[i + 1] = p.best_san
+    } else { evals.push(evals[i - 1] ?? 0); cls.push('good'); loss.push(0); evalText.push(evalText[i - 1] ?? '') } // beyond the analysed part
+  })
+  return { ...a, evals, cls, loss, best, evalText, real: true, covered: n, start: r.start_cp / 100, rp: r.plies }
+}
 
+/** Instant, fact-only summary built from the engine numbers; the AI Coach's explanation replaces it when it arrives. */
+function engineSummary(p: ReviewPly): string {
+  const pawns = (p.cp_loss / 100).toFixed(1)
+  if (p.classification === 'best') return p.is_engine_best ? `${p.san} is the engine's top choice. Evaluation after the move: ${p.eval_after}.` : `${p.san} is practically as good as the engine's top choice, ${p.best_san}.`
+  if (p.classification === 'good') return `${p.san} is a sound move (${p.eval_after}).${p.best_san ? ` The engine slightly preferred ${p.best_san}.` : ''}`
+  const reply = p.reply_san ? ` The opponent's strongest reply is now ${p.reply_san}.` : ''
+  return `${p.san} gives up about ${pawns} pawns of evaluation (${p.eval_before} → ${p.eval_after}). Stockfish preferred ${p.best_san}.${reply}`
+}
 const SAMPLE = '1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. Ng5 d5 5. exd5 Nxd5 6. Nxf7 Kxf7 7. Qf3+ Ke6 8. Nc3 Nb4 9. O-O c6 10. d4 Kd7 *'
 
 function explain(a: Analysed, ply: number): string {
@@ -69,7 +96,10 @@ export default function Analysis() {
 
   useEffect(() => { if (analysisSeed) { setPgn(analysisSeed); setAnalysisSeed(null); setPly(0) } }, [analysisSeed, setAnalysisSeed])
   const a = useMemo(() => build(pgn), [pgn])
-  const view = a ?? build(null)!
+  const { status: rs, review, error: rerr, retry } = useGameReview(pgn && a ? pgn : null)
+  const view = useMemo(() => { const v = a ?? build(null)!; return review ? applyReview(v, review) : v }, [a, review])
+  const [showBest, setShowBest] = useState(false)
+  useEffect(() => { setShowBest(false) }, [ply, pgn])
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
@@ -83,13 +113,24 @@ export default function Analysis() {
   }, [view.sans.length])
 
   const acc = (parity: 0 | 1) => {
-    const ls = view.loss.filter((_, i) => i % 2 === parity)
+    const ls = view.loss.filter((_, i) => i % 2 === parity && i < (view.covered ?? Infinity))
     return Math.max(20, Math.min(99.9, 100 - (ls.reduce((s, x) => s + x, 0) / Math.max(ls.length, 1)) * 45))
   }
   const count = (parity: 0 | 1, c: Cls) => view.cls.filter((x, i) => i % 2 === parity && x === c).length
   const data = [{ p: 0, e: 0.2 }, ...view.evals.map((e, i) => ({ p: i + 1, e: Math.max(-10, Math.min(10, e)) }))]
   const critical = view.cls.map((c, i) => ({ c, i })).filter((x) => ['blunder', 'mistake', 'brilliant', 'great'].includes(x.c)).slice(0, 6)
-  const evalNow = ply === 0 ? 0.2 : view.evals[ply - 1]
+    const evalNow = ply === 0 ? (view.start ?? 0.2) : view.evals[ply - 1]
+  const rp = ply > 0 ? view.rp?.[ply - 1] : undefined
+  const analysed = !!rp
+  const best = pgn && rp && !rp.is_engine_best && rp.best_san ? { san: rp.best_san, line: rp.best_line } : null
+  const bestArrow = (() => {
+    if (!showBest || !best) return undefined
+    try { const m = new Chess(view.fens[ply - 1]).move(best.san); return [{ from: m.from, to: m.to }] } catch { return undefined }
+  })()
+  const notice = !pgn ? null
+    : rs === 'loading' ? 'Stockfish is analysing this game — the numbers shown are provisional.'
+    : rs === 'error' ? `Stockfish review unavailable (${rerr}). Evaluations are rough estimates from material.`
+    : review?.truncated && view.real ? `Analysed the first ${view.covered} of ${review.total_plies} half-moves.` : null
   const cur = ply > 0 ? view.cls[ply - 1] : undefined
   const winner = view.headers.Result === '1-0' ? 'White' : view.headers.Result === '0-1' ? 'Black' : null
 
@@ -120,7 +161,7 @@ export default function Analysis() {
         <BoardColumn>
           <div className="flex gap-3 items-stretch">
             <EvalBar value={evalNow} orientation={flip ? 'b' : 'w'} />
-            <div className="flex-1 min-w-0"><ChessBoard fen={view.fens[ply]} orientation={flip ? 'b' : 'w'} lastMove={ply ? view.moves[ply - 1] : null} /></div>
+            <div className="flex-1 min-w-0"><ChessBoard fen={view.fens[ply]} orientation={flip ? 'b' : 'w'} lastMove={ply ? view.moves[ply - 1] : null} arrows={bestArrow} /></div>
           </div>
           <div className="flex gap-2 mt-4">
             {[['⏮', () => setPly(0)], ['◀', () => setPly((p) => Math.max(0, p - 1))], ['▶', () => setPly((p) => Math.min(view.sans.length, p + 1))], ['⏭', () => setPly(view.sans.length)], ['Flip', () => setFlip((f) => !f)]].map(([l, fn], i) => <button key={i} onClick={fn as () => void} className="btn btn-ghost flex-1 !px-2">{l as string}</button>)}
@@ -150,9 +191,16 @@ export default function Analysis() {
             <div className="space-y-5">
               <div className="border-l-2 pl-5" style={{ borderColor: cur ? CLS[cur].color : '#5c0a0a' }}>
                 <p className="label">{ply ? `Move ${Math.ceil(ply / 2)}${ply % 2 ? '' : '…'} · ${view.sans[ply - 1]}` : 'Starting position'}{cur && <span className="ml-2" style={{ color: CLS[cur].color }}>{CLS[cur].label}</span>}</p>
-                <p className="mt-2 leading-relaxed">{explain(view, ply)}</p>
-                {ply > 0 && view.best[ply] && <p className="mt-2 text-sm text-ash">Engine preferred: <span className="text-bone">{view.best[ply]}</span></p>}
-                {ply > 0 && <p className="mt-1 text-sm text-ash">Evaluation <span className="text-bone tabular-nums">{fmtEval(evalNow)}</span></p>}
+                                {pgn || ply === 0 ? (
+                  <CoachPanel pgn={pgn} ply={ply} lastPly={view.sans.length} summary={rp ? engineSummary(rp) : explain(view, ply)} analysed={analysed} best={best}
+                    showBest={showBest} onToggleBest={() => setShowBest((b) => !b)} onNext={() => setPly((p) => Math.min(view.sans.length, p + 1))}
+                    evaluation={view.evalText?.[ply - 1] ?? fmtEval(evalNow)} notice={notice} onRetry={rs === 'error' ? retry : undefined} />
+                ) : (<>
+                  <p className="mt-2 leading-relaxed">{explain(view, ply)}</p>
+                  {view.best[ply] && <p className="mt-2 text-sm text-ash">Engine preferred: <span className="text-bone">{view.best[ply]}</span></p>}
+                  <p className="mt-1 text-sm text-ash">Evaluation <span className="text-bone tabular-nums">{fmtEval(evalNow)}</span></p>
+                  <div className="flex gap-2 mt-3"><button className="btn !px-4" onClick={() => setPly((p) => Math.min(view.sans.length, p + 1))} disabled={ply >= view.sans.length}>Next</button></div>
+                </>)}
               </div>
               <button className="btn w-full" onClick={askCoach}>Ask AI Coach about {ply ? 'this move' : 'this game'}</button>
             </div>

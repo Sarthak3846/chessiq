@@ -12,6 +12,7 @@ from .llm.router import router as llm_router
 from .routes_account import router as account_router
 from .routes_coach import router as coach_router
 from .routes_puzzles import router as puzzles_router
+from .routes_review import router as review_router
 
 logging.basicConfig(level=logging.INFO)
 
@@ -30,6 +31,7 @@ app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), al
 app.include_router(account_router)
 app.include_router(puzzles_router)
 app.include_router(coach_router)
+app.include_router(review_router)
 
 
 @app.get("/api/health")
